@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from threading import Thread
 import queue
 from ball_detection import detect_ball_x
+from PIL import Image, ImageTk
 
 class BasicPIDController:
     def __init__(self, config_file="config.json"):
@@ -40,6 +41,9 @@ class BasicPIDController:
         self.position_queue = queue.Queue(maxsize=1)
         self.running = False    # Main run flag for clean shutdown
 
+        # added
+        self.latest_frame = None
+
     def connect_servo(self):
         """Try to open serial connection to servo, return True if success."""
         try:
@@ -55,9 +59,13 @@ class BasicPIDController:
         """Send angle command to servo motor (clipped for safety)."""
         if self.servo:
             servo_angle = self.neutral_angle + angle
-            servo_angle = int(np.clip(servo_angle, 0, 30))
+            servo_angle = int(np.clip(servo_angle, 5, 25))
+            print(f"[SERVO] Sending: {servo_angle}")
+
             try:
                 self.servo.write(bytes([servo_angle]))
+
+
             except Exception:
                 print("[SERVO] Send failed")
 
@@ -82,7 +90,13 @@ class BasicPIDController:
 
     def camera_thread(self):
         """Dedicated thread for video capture and ball detection."""
-        cap = cv2.VideoCapture(self.config['camera']['index'], cv2.CAP_DSHOW)
+        cap = cv2.VideoCapture(self.config['camera']['index']) #         cap = cv2.VideoCapture(self.config['camera']['index'], cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            print("[CAMERA] Failed to open")
+            self.running = False
+            return
+
+        print("[CAMERA] Connected")
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         while self.running:
             ret, frame = cap.read()
@@ -91,6 +105,7 @@ class BasicPIDController:
             frame = cv2.resize(frame, (320, 240))
             # Detect ball position in frame
             found, x_normalized, vis_frame = detect_ball_x(frame)
+            self.latest_frame = vis_frame
             if found:
                 # Convert normalized to meters using scale
                 position_m = x_normalized * self.scale_factor
@@ -101,11 +116,11 @@ class BasicPIDController:
                     self.position_queue.put_nowait(position_m)
                 except Exception:
                     pass
-            # Show processed video with overlays
-            cv2.imshow("Ball Tracking", vis_frame)
-            if cv2.waitKey(1) & 0xFF == 27:  # ESC exits
-                self.running = False
-                break
+            # Show processed video with overlays - commented out below
+            # cv2.imshow("Ball Tracking", vis_frame)
+            # if cv2.waitKey(1) & 0xFF == 27:  # ESC exits
+            #     self.running = False
+            #     break
         cap.release()
         cv2.destroyAllWindows()
 
@@ -113,6 +128,18 @@ class BasicPIDController:
         """Runs PID control loop in parallel with GUI and camera."""
         if not self.connect_servo():
             print("[ERROR] No servo - running in simulation mode")
+
+        # while self.running:
+        #     self.send_servo_angle(-10)  # 5°
+        #     time.sleep(2)
+
+        #     self.send_servo_angle(0)    # 15°
+        #     time.sleep(2)
+
+        #     self.send_servo_angle(10)   # 25°
+        #     time.sleep(2)
+
+            #self.send_servo_angle(0)    # 15° ← back to neutral
         self.start_time = time.time()
         while self.running:
             try:
@@ -143,7 +170,10 @@ class BasicPIDController:
         """Build Tkinter GUI with large sliders and labeled controls."""
         self.root = tk.Tk()
         self.root.title("Basic PID Controller")
-        self.root.geometry("520x400")
+        self.root.geometry("520x700") # ("520x400")
+        # Area for live camera - added
+        self.camera_label = ttk.Label(self.root)
+        self.camera_label.pack(pady=10)
 
         # Title label
         ttk.Label(self.root, text="PID Gains", font=("Arial", 18, "bold")).pack(pady=10)
@@ -203,6 +233,16 @@ class BasicPIDController:
     def update_gui(self):
         """Reflect latest values from sliders into program and update display."""
         if self.running:
+            # Update camera display -added
+            if self.latest_frame is not None:
+                frame = cv2.cvtColor(self.latest_frame, cv2.COLOR_BGR2RGB)
+
+                image = Image.fromarray(frame)
+                image = ImageTk.PhotoImage(image=image)
+
+                self.camera_label.config(image=image)
+                self.camera_label.image = image
+
             # PID parameters
             self.Kp = self.kp_var.get()
             self.Ki = self.ki_var.get()
@@ -262,14 +302,18 @@ class BasicPIDController:
         print("Close camera window or click Stop to exit")
         self.running = True
 
+        # create GUI
+        self.create_gui()
+
         # Start camera and control threads, mark as daemon for exit
         cam_thread = Thread(target=self.camera_thread, daemon=True)
         ctrl_thread = Thread(target=self.control_thread, daemon=True)
         cam_thread.start()
         ctrl_thread.start()
+        #ctrl_thread.join()
 
         # Build and run GUI in main thread
-        self.create_gui()
+        #self.create_gui()
         self.root.mainloop()
 
         # After GUI ends, stop everything
@@ -280,6 +324,7 @@ if __name__ == "__main__":
     try:
         controller = BasicPIDController()
         controller.run()
+
     except FileNotFoundError:
         print("[ERROR] config.json not found. Run simple_autocal.py first.")
     except Exception as e:
