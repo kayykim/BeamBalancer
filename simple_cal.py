@@ -16,7 +16,7 @@ class SimpleAutoCalibrator:
     def __init__(self):
         """Initialize calibration parameters and default values."""
         # Physical system parameters
-        self.BEAM_LENGTH_M = 0.2  # Known beam length in meters
+        self.BEAM_LENGTH_M = 0.215  # Known beam length in meters
         
         # Camera configuration
         self.CAM_INDEX = 0  # Default camera index
@@ -37,7 +37,7 @@ class SimpleAutoCalibrator:
         
         # Servo hardware configuration
         self.servo = None  # Serial connection to servo
-        self.servo_port = "COM3"  # Servo communication port
+        self.servo_port = "/dev/cu.usbmodem1401"  # Servo communication port
         self.neutral_angle = 15  # Servo neutral position angle
         
         # Position limit results
@@ -67,7 +67,7 @@ class SimpleAutoCalibrator:
         """
         if self.servo:
             # Clip angle to safe range and send as byte
-            angle = int(np.clip(angle, 0, 30))
+            angle = int(np.clip(angle, 5, 25))
             self.servo.write(bytes([angle]))
 
     def mouse_callback(self, event, x, y, flags, param):
@@ -349,7 +349,12 @@ class SimpleAutoCalibrator:
     def run(self):
         """Main calibration loop with interactive GUI."""
         # Initialize camera capture
-        self.cap = cv2.VideoCapture(self.CAM_INDEX, cv2.CAP_DSHOW)
+        self.cap = cv2.VideoCapture(self.CAM_INDEX)  
+        if not self.cap.isOpened():
+            print("[CAMERA] Failed to open")
+            return
+        print("[CAMERA] Connected")
+
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.FRAME_W)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.FRAME_H)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize latency
